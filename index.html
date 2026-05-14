@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>NeoEarn - Earn Coins, Withdraw Cash</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+
+    <style>
+        body { font-family: 'Poppins', system-ui, sans-serif; background-color: #f8fafc; overflow-x: hidden; }
+        .premium-gradient { background: linear-gradient(135deg, #be185d 0%, #7e22ce 100%); }
+        .glass-card { background: rgba(255,255,255,0.2); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.3); }
+        .tab-active { color: #7e22ce !important; border-top: 3px solid #7e22ce; padding-top: 8px; }
+        .btn-disabled { opacity: 0.5; pointer-events: none; }
+        #wheel-wrapper { position: relative; width: 280px; height: 280px; margin: 0 auto; }
+        #wheel-svg { width: 100%; height: 100%; border-radius: 50%; border: 8px solid #fff; box-shadow: 0 10px 30px rgba(0,0,0,0.15); transition: transform 4s cubic-bezier(0.25,1,0.5,1); transform: rotate(0deg); }
+        .wheel-pointer { position: absolute; top: -15px; left: 50%; transform: translateX(-50%); z-index: 50; width: 0; height: 0; border-left: 15px solid transparent; border-right: 15px solid transparent; border-top: 30px solid #ef4444; filter: drop-shadow(0 4px 4px rgba(0,0,0,0.2)); }
+        .hide-scroll::-webkit-scrollbar { display: none; }
+        .fade-in { animation: fadeIn 0.5s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        #global-loader { background: rgba(255,255,255,0.9); z-index: 2000; }
+        .badge-pending { background: #fef3c7; color: #92400e; }
+        .badge-success { background: #d1fae5; color: #065f46; }
+        .badge-rejected { background: #fee2e2; color: #991b1b; }
+        .gateway-selected { border: 2px solid #7e22ce !important; background: #faf5ff !important; }
+        .amount-chip-active { border: 2px solid #7e22ce !important; background: #faf5ff !important; transform: scale(0.98); }
+        .ptr-element { position: absolute; top: 0; left: 0; width: 100%; background: transparent; display: flex; justify-content: center; padding: 20px; transform: translateY(-100%); transition: transform 0.3s; }
+        .ptr-active .ptr-element { transform: translateY(0); }
+        .offline-overlay {
+            position: fixed; inset: 0; background: white; z-index: 10000;
+            display: flex; align-items: center; justify-content: center; text-align: center;
+            font-family: system-ui, sans-serif;
+        }
+        .offline-card {
+            max-width: 320px; background: #fff; border-radius: 2rem; padding: 2rem;
+            box-shadow: 0 20px 35px -8px rgba(0,0,0,0.1);
+        }
+        .offline-retry {
+            background: linear-gradient(135deg, #be185d, #7e22ce); color: white;
+            border: none; padding: 0.75rem 1.5rem; border-radius: 2rem;
+            font-weight: bold; width: 100%; cursor: pointer;
+        }
+        .social-bar-container {
+            position: fixed;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 1000;
+            background: transparent;
+        }
+    </style>
+</head>
+<body class="hide-scroll">
+
+    <!-- OFFLINE OVERLAY -->
+    <div id="offlineOverlay" class="offline-overlay" style="display: none;">
+        <div class="offline-card">
+            <div class="offline-icon">📡</div>
+            <div class="offline-title">No Internet</div>
+            <div class="offline-text">Please check your connection and try again.</div>
+            <button id="retryConnectionBtn" class="offline-retry">⟳ Retry</button>
+        </div>
+    </div>
+
+    <div id="global-loader" class="fixed inset-0 hidden flex items-center justify-center z-[2000] bg-white/90"><div class="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-purple-600"></div></div>
+    <div id="toast" class="fixed top-5 left-1/2 -translate-x-1/2 z-[3000] hidden opacity-0 transition-all duration-300"><div id="toast-bg" class="bg-slate-900 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 min-w-[320px]"><i id="toast-icon" class="fas fa-info-circle text-blue-400"></i><p id="toast-msg" class="text-sm font-semibold"></p></div></div>
+    <div id="confirm-dialog" class="fixed inset-0 bg-black/50 z-[3500] hidden items-center justify-center p-6"><div class="bg-white rounded-[2rem] p-6 w-full max-w-sm"><h3 class="font-black text-xl mb-4">Confirm Action</h3><p class="text-slate-600 mb-6">Are you sure?</p><div class="flex gap-3"><button id="confirm-no" class="flex-1 py-3 rounded-xl bg-slate-100 font-bold">Cancel</button><button id="confirm-yes" class="flex-1 py-3 rounded-xl bg-purple-600 text-white font-bold">Confirm</button></div></div></div>
+    
+    <div id="legal-modal" class="fixed inset-0 z-[4500] hidden items-center justify-center p-4" style="background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);"><div class="bg-white rounded-[2rem] max-w-lg w-full max-h-[80vh] overflow-y-auto p-6"><div class="flex justify-between items-center mb-4"><h2 id="modal-title" class="text-2xl font-black text-purple-700">Terms & Conditions</h2><button onclick="closeLegalModal()" class="text-slate-400 text-2xl">&times;</button></div><div id="modal-body" class="text-slate-600 text-sm space-y-3"></div><button onclick="closeLegalModal()" class="mt-5 w-full bg-purple-600 text-white py-3 rounded-xl font-bold">Close</button></div></div>
+
+    <!-- Splash Screen -->
+    <div id="splash-screen" class="fixed inset-0 z-[2500] premium-gradient flex flex-col items-center justify-center text-white transition-opacity duration-700"><div class="bg-white p-6 rounded-[3rem] mb-6 shadow-2xl animate-bounce"><i class="fas fa-gem text-6xl text-purple-600"></i></div><h1 class="text-5xl font-black italic tracking-tighter">NeoEarn</h1><p class="mt-2 text-white/70 font-light uppercase tracking-[0.3em] text-[10px]">Premium Fintech Ecosystem</p></div>
+
+    <!-- Auth Screen -->
+    <div id="auth-screen" class="hidden min-h-screen bg-slate-50 fade-in"><div class="premium-gradient h-[28vh] rounded-b-[4rem] flex flex-col items-center justify-center text-white p-8"><h2 class="text-3xl font-extrabold tracking-tight">Welcome Back</h2><p class="text-white/80 mt-2 text-sm text-center font-medium">Your premium rewards gateway awaits</p></div><div class="px-6 -mt-16 pb-12"><div class="bg-white rounded-[2.5rem] shadow-2xl p-8 border border-slate-100"><div id="login-view" class="space-y-5"><div class="relative"><i class="fas fa-envelope absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i><input type="email" id="login-email" placeholder="Gmail Address" class="w-full bg-slate-50 rounded-2xl px-12 py-4 outline-none border-2 border-transparent focus:border-purple-500 transition-all"></div><div class="relative"><i class="fas fa-lock absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i><input type="password" id="login-pass" placeholder="Password" class="w-full bg-slate-50 rounded-2xl px-12 py-4 outline-none border-2 border-transparent focus:border-purple-500 transition-all"></div><button onclick="window.handleLogin()" class="w-full premium-gradient py-4 rounded-2xl text-white font-bold shadow-lg shadow-purple-200 active:scale-95 transition-all">Secure Access</button><p class="text-center text-slate-500 text-sm">New to NeoEarn? <span onclick="window.toggleAuth(false)" class="text-purple-600 font-bold cursor-pointer underline">Register Now</span></p><div class="text-[10px] text-center text-slate-400">📧 Verification email? Check <strong>Spam/Junk</strong> folder</div></div><div id="register-view" class="hidden space-y-5"><div class="relative"><i class="fas fa-envelope absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i><input type="email" id="reg-email" placeholder="Gmail Address" class="w-full bg-slate-50 rounded-2xl px-12 py-4 outline-none border-2 border-transparent focus:border-purple-500 transition-all"></div><div class="relative"><i class="fas fa-lock absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i><input type="password" id="reg-pass" placeholder="Create Password (min 6 chars)" class="w-full bg-slate-50 rounded-2xl px-12 py-4 outline-none border-2 border-transparent focus:border-purple-500 transition-all"></div><div class="relative"><i class="fas fa-check-circle absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i><input type="password" id="reg-confirm" placeholder="Confirm Password" class="w-full bg-slate-50 rounded-2xl px-12 py-4 outline-none border-2 border-transparent focus:border-purple-500 transition-all"></div><div class="relative"><i class="fas fa-gift absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i><input type="text" id="reg-refer" placeholder="Referral Code (Optional)" class="w-full bg-slate-50 rounded-2xl px-12 py-4 outline-none border-2 border-transparent focus:border-purple-500 transition-all"></div><div class="flex items-start gap-2"><input type="checkbox" id="terms-checkbox" class="mt-1 w-4 h-4 accent-purple-600"><label class="text-[11px] text-slate-600">I agree to the <button type="button" onclick="showLegal('terms')" class="text-purple-600 underline">Terms & Conditions</button> and <button type="button" onclick="showLegal('privacy')" class="text-purple-600 underline">Privacy Policy</button></label></div><button onclick="window.handleRegister()" class="w-full premium-gradient py-4 rounded-2xl text-white font-bold shadow-lg shadow-purple-200 active:scale-95 transition-all">Create Identity</button><p class="text-center text-slate-500 text-sm">Have an account? <span onclick="window.toggleAuth(true)" class="text-purple-600 font-bold cursor-pointer underline">Back to Login</span></p></div></div></div></div>
+
+    <!-- Main App Container -->
+    <div id="app-container" class="hidden min-h-screen bg-[#fcfcfd] fade-in pb-24">
+        <header class="premium-gradient h-[18vh] rounded-b-[3rem] px-8 flex items-center justify-between text-white shadow-lg sticky top-0 z-40"><div><p class="text-[10px] opacity-70 uppercase tracking-widest font-black">Success Awaits,</p><h3 id="user-display-name" class="font-black text-xl truncate w-40">User</h3><p id="email-verify-badge" class="text-[8px] mt-1 opacity-80 hidden">⚠️ Verify Email</p></div><div class="w-12 h-12 rounded-2xl bg-white/20 border border-white/30 flex items-center justify-center text-2xl shadow-inner"><i class="fas fa-user-astronaut"></i></div></header>
+        <div class="ptr-element" id="ptr-indicator"><div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-purple-600"></div><span class="ml-2 text-xs">Refreshing...</span></div>
+        <main class="mt-6 main-content">
+            <!-- HOME TAB -->
+            <div id="tab-home" class="tab-content active px-6 space-y-6">
+                <div class="glass-card rounded-[2.5rem] p-8 shadow-xl text-center relative overflow-hidden bg-white/40 border-white border"><div class="absolute -top-4 -right-4 text-7xl opacity-5"><i class="fas fa-wallet"></i></div><p class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Available Balance</p><div class="flex items-center justify-center gap-3 mb-2"><i class="fas fa-coins text-yellow-500 text-4xl"></i><span id="balance-coins" class="text-5xl font-black text-slate-800 tracking-tighter">0</span></div><p class="text-[10px] bg-slate-900 text-white px-5 py-2 rounded-full inline-block font-black uppercase tracking-tighter">1000 COINS = ₹10</p></div>
+                
+                <div class="bg-white p-4 rounded-[2rem] shadow-sm flex items-center justify-between"><div class="flex items-center gap-3"><div class="w-12 h-12 rounded-xl bg-orange-100 text-orange-500 flex items-center justify-center"><i class="fas fa-fire text-xl"></i></div><div><p class="font-black text-xs">Daily Streak</p><p id="streak-count" class="text-2xl font-black text-orange-500">0</p><p id="streak-status" class="text-[9px] text-slate-400">Day 0/7</p></div></div><div class="text-right"><p class="text-[9px] text-slate-400">7th Day</p><p class="font-black text-purple-600 text-xs">🎁 Mystery Bonus</p></div></div>
+
+                <div class="bg-white p-6 rounded-[2rem] shadow-sm flex items-center gap-5 border border-slate-50 active:scale-95 transition-transform cursor-pointer" onclick="window.claimDaily()"><div class="w-16 h-16 rounded-2xl bg-orange-100 text-orange-500 flex items-center justify-center text-3xl shadow-sm"><i class="fas fa-calendar-check"></i></div><div class="flex-1"><p class="font-black text-slate-800 text-sm">Daily Bonus</p><p class="text-xs text-slate-400 font-normal">Tap to claim your reward</p></div><button id="btn-daily" class="px-6 py-3 bg-purple-600 text-white rounded-2xl text-[11px] font-black shadow-lg shadow-purple-100">CLAIM</button></div>
+
+                <!-- Refer & Earn -->
+                <div class="premium-gradient p-8 rounded-[3rem] text-white shadow-2xl relative"><h4 class="font-black text-lg leading-tight">Refer Friends<br><span class="text-white/60 text-xs font-normal">Earn 10% commission forever</span></h4><div class="mt-6 bg-black/20 rounded-2xl p-4 flex items-center justify-between border border-white/10"><div><p class="text-[9px] uppercase opacity-60 font-bold mb-1">Referral Code</p><span id="my-refer-code" class="font-mono text-2xl font-black tracking-widest uppercase text-white">-----</span></div><button onclick="window.copyReferCode()" class="bg-white text-purple-600 px-6 py-3 rounded-xl font-black text-xs shadow-xl active:scale-90">COPY</button></div><p id="refer-earnings" class="text-[10px] mt-4 text-center opacity-80">💰 Total Referral Earnings: 0 coins</p></div>
+
+                <!-- BANNER AD (only on home) -->
+                <div class="mt-2 mb-2 flex justify-center">
+                    <script> atOptions = { 'key' : '06ab1d7415bc4ed9fe94511519d145ff', 'format' : 'iframe', 'height' : 50, 'width' : 320, 'params' : {} }; </script>
+                    <script src="https://www.highperformanceformat.com/06ab1d7415bc4ed9fe94511519d145ff/invoke.js"></script>
+                </div>
+            </div>
+            
+            <!-- EARN TAB -->
+            <div id="tab-earn" class="tab-content hidden px-6 space-y-8"><h2 class="text-2xl font-black text-slate-800 italic"><i class="fas fa-bolt text-purple-600 mr-2"></i>Tasks Hub</h2>
+            <div class="bg-white rounded-[2.5rem] p-8 shadow-sm border-b-4 border-blue-600 text-center"><i class="fas fa-video text-blue-600 text-4xl mb-4"></i><h3 class="font-black text-slate-800 text-lg">Watch Ads</h3><p class="text-xs text-slate-500 mt-1">Watch 30 sec ad to earn coins</p><button id="watch-ad-btn" onclick="window.watchAd()" class="w-full bg-blue-600 text-white py-4 rounded-2xl font-black shadow-lg shadow-blue-100 mt-4 active:scale-95 transition-all">WATCH NOW</button><p class="text-[10px] font-black text-blue-600 mt-4 uppercase tracking-widest italic"><span id="ad-limit-ui">5 / 5</span> Ads Left Today</p></div>
+            <div class="bg-white rounded-[2.5rem] p-8 shadow-sm border-b-4 border-emerald-500 text-center"><i class="fas fa-hand-pointer text-emerald-500 text-4xl mb-4"></i><h3 class="font-black text-slate-800 text-lg">Tap Booster</h3><button id="btn-tap" onclick="window.handleTap()" class="w-full bg-emerald-500 text-white py-4 rounded-2xl font-black shadow-lg shadow-emerald-100 mt-4 transition-all">TAP REWARD</button><div id="tap-progress" class="mt-4 hidden"><div class="h-1 bg-slate-200 rounded-full overflow-hidden"><div id="tap-timer-bar" class="h-full bg-emerald-500 transition-all duration-1000" style="width:100%"></div></div><p id="tap-timer-text" class="text-[10px] mt-1 text-slate-500"></p></div><p class="text-[10px] font-black text-emerald-500 mt-4 uppercase tracking-widest italic"><span id="tap-limit-ui">5 / 5</span> Taps Left Today</p></div>
+            <div class="bg-white p-8 rounded-[3rem] shadow-xl text-center border border-slate-50"><h3 class="font-black text-slate-800 text-xl mb-10 tracking-tighter italic">Elite Spin Pro</h3><div id="wheel-wrapper"><div class="wheel-pointer"></div><svg id="wheel-svg" viewBox="0 0 100 100"></svg></div><div class="mt-10"><p class="text-[11px] font-black text-slate-500 mb-4 uppercase tracking-widest"><span id="spin-limit-ui" class="text-purple-600">5 / 5</span> Spins Left Today</p><button id="btn-spin" onclick="window.handleSpin()" class="w-full premium-gradient py-5 rounded-[2rem] text-white font-black text-lg shadow-2xl active:scale-95 transition-all">SPIN NOW</button></div></div></div>
+            
+            <!-- PAYOUT TAB -->
+            <div id="tab-payout" class="tab-content hidden px-6 space-y-8"><h2 class="text-2xl font-black text-slate-800 tracking-tighter italic">Liquidate Coins</h2><div class="space-y-4"><div onclick="window.selectGateway('GPay')" class="gw-card bg-white p-6 rounded-3xl shadow-sm border-2 border-transparent transition-all flex items-center justify-between cursor-pointer active:scale-95"><div class="flex items-center gap-4"><div class="w-14 h-14 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600 text-2xl"><i class="fab fa-google-pay"></i></div><span class="font-black text-slate-700 tracking-tight">Google Pay</span></div><i class="fas fa-chevron-right text-slate-300"></i></div><div onclick="window.selectGateway('PhonePe')" class="gw-card bg-white p-6 rounded-3xl shadow-sm border-2 border-transparent transition-all flex items-center justify-between cursor-pointer active:scale-95"><div class="flex items-center gap-4"><div class="w-14 h-14 rounded-2xl bg-purple-50 flex items-center justify-center text-purple-600 text-2xl"><i class="fas fa-mobile-alt"></i></div><span class="font-black text-slate-700">PhonePe</span></div><i class="fas fa-chevron-right text-slate-300"></i></div><div onclick="window.selectGateway('UPI')" class="gw-card bg-white p-6 rounded-3xl shadow-sm border-2 border-transparent transition-all flex items-center justify-between cursor-pointer active:scale-95"><div class="flex items-center gap-4"><div class="w-14 h-14 rounded-2xl bg-green-50 flex items-center justify-center text-green-600 text-2xl"><i class="fas fa-university"></i></div><span class="font-black text-slate-700">UPI Transfer</span></div><i class="fas fa-chevron-right text-slate-300"></i></div></div><div id="payout-panel" class="hidden space-y-8"><div class="grid grid-cols-2 gap-4">
+                <button onclick="window.setPayoutAmt(50, 5000, this)" data-rs="50" class="amt-chip bg-white border-2 border-slate-100 p-5 rounded-3xl text-center shadow-sm transition-all"><p class="text-xl font-black text-slate-800">₹50</p><p class="coin-amount text-[9px] text-slate-400 font-bold uppercase mt-1">5,000 Coins</p></button>
+                <button onclick="window.setPayoutAmt(100, 10000, this)" data-rs="100" class="amt-chip bg-white border-2 border-slate-100 p-5 rounded-3xl text-center shadow-sm transition-all"><p class="text-xl font-black text-slate-800">₹100</p><p class="coin-amount text-[9px] text-slate-400 font-bold uppercase mt-1">10,000 Coins</p></button>
+                <button onclick="window.setPayoutAmt(200, 20000, this)" data-rs="200" class="amt-chip bg-white border-2 border-slate-100 p-5 rounded-3xl text-center shadow-sm transition-all"><p class="text-xl font-black text-slate-800">₹200</p><p class="coin-amount text-[9px] text-slate-400 font-bold uppercase mt-1">20,000 Coins</p></button>
+                <button onclick="window.setPayoutAmt(500, 50000, this)" data-rs="500" class="amt-chip bg-white border-2 border-slate-100 p-5 rounded-3xl text-center shadow-sm transition-all"><p class="text-xl font-black text-slate-800">₹500</p><p class="coin-amount text-[9px] text-slate-400 font-bold uppercase mt-1">50,000 Coins</p></button>
+            </div><div class="space-y-4"><input type="text" id="payout-addr" placeholder="UPI ID / Mobile Number" class="w-full bg-white p-5 rounded-3xl outline-none border-2 border-slate-100 font-bold text-sm shadow-inner focus:border-purple-600 transition-all"><div class="bg-yellow-50 p-4 rounded-2xl"><p id="minCoinsMsg" class="text-[10px] font-bold text-yellow-700 uppercase">Minimum ₹50 (5,000 coins)</p><p id="payout-warning" class="text-[9px] text-red-500 hidden mt-1">Insufficient balance!</p></div><button onclick="window.submitRedeem()" class="w-full premium-gradient py-5 rounded-[2rem] text-white font-black text-lg shadow-2xl active:scale-95 transition-all">CONFIRM REDEMPTION</button></div></div><div class="mt-12"><h4 class="font-black text-slate-800 mb-6 text-sm flex items-center gap-2 italic"><i class="fas fa-history text-purple-600"></i> Withdrawal Logs</h4><div id="payout-history-list" class="space-y-4 max-h-96 overflow-y-auto"><p class="text-center text-[10px] text-slate-400 py-10 font-black uppercase tracking-widest bg-white rounded-3xl border border-dashed border-slate-200">No records found</p></div></div></div>
+            
+            <!-- PROFILE TAB -->
+            <div id="tab-profile" class="tab-content hidden"><div class="premium-gradient p-12 flex flex-col items-center text-white rounded-b-[4.5rem] shadow-2xl"><div class="w-28 h-28 bg-white/20 rounded-full flex items-center justify-center text-5xl border-4 border-white/30 mb-6 shadow-2xl backdrop-blur-md"><i class="fas fa-user-circle"></i></div><h3 id="prof-email" class="font-black text-xl truncate w-full text-center tracking-tight">---</h3><div id="prof-verify-badge" class="mt-2 text-[10px] bg-yellow-500 px-3 py-1 rounded-full hidden">Not Verified</div><button id="send-verify-btn" onclick="window.sendVerificationEmail()" class="mt-3 text-[10px] bg-white/20 px-4 py-2 rounded-full hidden">Resend Verification Email</button><div class="mt-6 flex justify-center gap-4"><div class="bg-white/10 px-8 py-3 rounded-2xl text-center backdrop-blur-md border border-white/10"><p class="text-[9px] opacity-60 uppercase font-black tracking-[0.2em] mb-1">Lifetime Earned</p><p id="lifetime-coins" class="font-black text-2xl">0</p></div></div></div><div class="p-8 space-y-4"><button onclick="window.showLeaderboard()" class="w-full bg-white p-6 rounded-[2.5rem] shadow-sm flex items-center justify-between font-black text-slate-700 text-sm border border-slate-50 active:bg-slate-50 transition-all"><span class="flex items-center gap-4 text-purple-600"><i class="fas fa-trophy text-lg"></i> Leaderboard</span><i class="fas fa-chevron-right text-slate-300"></i></button><button onclick="window.showDailyTasks()" class="w-full bg-white p-6 rounded-[2.5rem] shadow-sm flex items-center justify-between font-black text-slate-700 text-sm border border-slate-50 active:bg-slate-50 transition-all"><span class="flex items-center gap-4 text-purple-600"><i class="fas fa-tasks text-lg"></i> Daily Tasks</span><i class="fas fa-chevron-right text-slate-300"></i></button><button onclick="window.handleLogout()" class="w-full bg-rose-50 text-rose-600 p-6 rounded-[2.5rem] font-black text-sm border border-rose-100 flex items-center justify-center gap-3 active:scale-95 transition-all shadow-sm"><i class="fas fa-power-off"></i> LOGOUT FROM APP</button>
+            <div class="flex gap-3 mt-4"><button onclick="showLegal('privacy')" class="flex-1 bg-slate-100 p-4 rounded-2xl font-black text-slate-700 text-sm"><i class="fas fa-shield-alt mr-2"></i>Privacy Policy</button><button onclick="showLegal('terms')" class="flex-1 bg-slate-100 p-4 rounded-2xl font-black text-slate-700 text-sm"><i class="fas fa-file-contract mr-2"></i>Terms & Conditions</button></div></div></div>
+        </main>
+        <nav class="fixed bottom-6 left-1/2 -translate-x-1/2 w-[92%] max-w-lg bg-white/80 backdrop-blur-2xl border border-slate-100 p-3 shadow-[0_20px_50px_rgba(0,0,0,0.15)] flex justify-around items-center z-50 rounded-[2.5rem]"><button onclick="window.switchTab('home',this)" class="nav-btn px-6 py-2 transition-all tab-active flex flex-col items-center"><i class="fas fa-home-alt text-xl"></i><span class="text-[9px] font-black mt-1 uppercase">Home</span></button><button onclick="window.switchTab('earn',this)" class="nav-btn px-6 py-2 transition-all flex flex-col items-center text-slate-400"><i class="fas fa-gem text-xl"></i><span class="text-[9px] font-black mt-1 uppercase">Earn</span></button><button onclick="window.switchTab('payout',this)" class="nav-btn px-6 py-2 transition-all flex flex-col items-center text-slate-400"><i class="fas fa-wallet text-xl"></i><span class="text-[9px] font-black mt-1 uppercase">Payout</span></button><button onclick="window.switchTab('profile',this)" class="nav-btn px-6 py-2 transition-all flex flex-col items-center text-slate-400"><i class="fas fa-user-circle text-xl"></i><span class="text-[9px] font-black mt-1 uppercase">User</span></button></nav>
+    </div>
+
+    <!-- ========== SOCIAL BAR AD ========== -->
+    <div id="socialBarContainer" class="social-bar-container"></div>
+    <script>
+        (function() {
+            var container = document.getElementById('socialBarContainer');
+            if (container) {
+                var script = document.createElement('script');
+                script.src = "https://pl29437877.profitablecpmratenetwork.com/1d/5e/d6/1d5ed6cc2ecf50b77cfebde0b2e39837.js";
+                script.async = true;
+                container.appendChild(script);
+            }
+        })();
+    </script>
+
+    <script>
+        // Firebase config
+        const firebaseConfig = {
+            apiKey: "AIzaSyC8A35tJY4RZhidqGm3YPLJ7yS_TyG-GfM",
+            authDomain: "my-earning-app-9d4f6.firebaseapp.com",
+            projectId: "my-earning-app-9d4f6",
+            storageBucket: "my-earning-app-9d4f6.firebasestorage.app",
+            messagingSenderId: "702953029333",
+            appId: "1:702953029333:web:33b2828d437d42c5982c5c"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        // ----- OFFLINE DETECTION (short version) -----
+        const offlineOverlay = document.getElementById('offlineOverlay');
+        let wasOffline = false;
+        function updateOnlineStatus() {
+            if (navigator.onLine) {
+                offlineOverlay.style.display = 'none';
+                if (wasOffline) { showToast("Internet restored! Refreshing...", "success"); setTimeout(() => location.reload(), 1500); }
+                wasOffline = false;
+            } else {
+                offlineOverlay.style.display = 'flex';
+                document.getElementById('splash-screen').classList.add('hidden');
+                document.getElementById('auth-screen').classList.add('hidden');
+                document.getElementById('app-container').classList.add('hidden');
+                wasOffline = true;
+            }
+        }
+        window.addEventListener('online', updateOnlineStatus);
+        window.addEventListener('offline', updateOnlineStatus);
+        document.getElementById('retryConnectionBtn')?.addEventListener('click', () => { if (navigator.onLine) location.reload(); else showToast("Still offline.", "error"); });
+        updateOnlineStatus();
+        if (!navigator.onLine) var stop = true;
+
+        let popunderScriptLoaded = false;
+        function triggerPopunder() {
+            if (!popunderScriptLoaded) {
+                const script = document.createElement('script');
+                script.src = "https://pl29392990.profitablecpmratenetwork.com/ca/c4/8f/cac48f2303834635a9df11db96fb1770.js";
+                script.async = true;
+                script.onload = function() { popunderScriptLoaded = true; if (typeof openPopunder === 'function') openPopunder(); };
+                document.head.appendChild(script);
+            } else {
+                if (typeof openPopunder === 'function') openPopunder();
+            }
+        }
+
+        let withdrawalRates = { '50': 5000, '100': 10000, '200': 20000, '500': 50000 };
+        async function loadWithdrawalRates() {
+            try {
+                const doc = await db.collection('settings').doc('withdrawalRates').get();
+                if (doc.exists) {
+                    const data = doc.data();
+                    withdrawalRates['50'] = data.rate50 || 5000;
+                    withdrawalRates['100'] = data.rate100 || 10000;
+                    withdrawalRates['200'] = data.rate200 || 20000;
+                    withdrawalRates['500'] = data.rate500 || 50000;
+                }
+                document.querySelectorAll('.amt-chip').forEach(btn => {
+                    const rs = btn.getAttribute('data-rs');
+                    if (rs && withdrawalRates[rs]) {
+                        const coinSpan = btn.querySelector('.coin-amount');
+                        if (coinSpan) coinSpan.innerText = `${withdrawalRates[rs].toLocaleString()} Coins`;
+                    }
+                });
+                const minMsg = document.getElementById('minCoinsMsg');
+                if (minMsg && withdrawalRates['50']) minMsg.innerText = `Minimum ₹50 (${withdrawalRates['50'].toLocaleString()} coins)`;
+            } catch (err) { console.error("Error loading rates:", err); }
+        }
+
+        const requestLog = { ads: [], taps: [], spins: [] };
+        const RATE_LIMIT_MS = 2000;
+        function isRateLimited(action) { const now = Date.now(); const last = requestLog[action]?.[requestLog[action].length-1] || 0; if (now - last < RATE_LIMIT_MS) { showToast("Please wait before next action","error"); return true; } requestLog[action].push(now); if (requestLog[action].length > 10) requestLog[action].shift(); return false; }
+
+        let currentUserId = null;
+        let userData = { balance:0, lifetimeEarned:0, referCode:'-----', referralEarnings:0, remainingAds:5, remainingTaps:5, remainingSpins:5, dailyCheckinClaimed:false, lastActiveDate:'', streak:0 };
+        const wheelRewards = [5,10,15,20,25,35,50];
+        const sliceAngle = 360/7;
+        let selectedGateway='', selectedRs=0, coinsNeeded=0;
+        let isSpinning=false, isTapping=false, tapInterval=null;
+        let unsubscribeUser=null, unsubscribePayouts=null;
+
+        function showLegal(type) {
+            const modal = document.getElementById('legal-modal');
+            const title = document.getElementById('modal-title');
+            const body = document.getElementById('modal-body');
+            if(type === 'terms') {
+                title.innerText = 'Terms & Conditions';
+                body.innerHTML = `<p><strong>1. Eligibility</strong><br>You must be at least 18 years old.</p><p><strong>2. Earning Coins</strong><br>Coins earned via tasks, ads, taps, spins, referrals.</p><p><strong>3. Withdrawals</strong><br>Min ${withdrawalRates['50'].toLocaleString()} coins = ₹50. Processed in 3-5 days.</p><p><strong>4. Fair Usage</strong><br>Cheating leads to permanent ban.</p><p><strong>5. Changes</strong><br>NeoEarn may modify rates anytime.</p>`;
+            } else {
+                title.innerText = 'Privacy Policy';
+                body.innerHTML = `<p><strong>Data Collection</strong><br>We collect email and transaction history.</p><p><strong>Use of Data</strong><br>To provide rewards, process withdrawals.</p><p><strong>Third Parties</strong><br>We use Firebase (Google).</p><p><strong>Security</strong><br>Your data is protected.</p><p><strong>Contact</strong><br>support@neoearn.com</p>`;
+            }
+            modal.classList.remove('hidden'); modal.classList.add('flex');
+        }
+        window.showLegal = showLegal;
+        function closeLegalModal() { const modal = document.getElementById('legal-modal'); modal.classList.add('hidden'); modal.classList.remove('flex'); }
+        window.closeLegalModal = closeLegalModal;
+
+        function hideScreen(id) { const el = document.getElementById(id); if(el) el.classList.add('hidden'); }
+        function showScreen(id) { const el = document.getElementById(id); if(el) el.classList.remove('hidden'); }
+        function toggleGlobalLoader(show) { const loader = document.getElementById('global-loader'); if(show) loader.classList.remove('hidden'); else loader.classList.add('hidden'); }
+        function showToast(msg, type="success") {
+            const t = document.getElementById('toast'); const icon = document.getElementById('toast-icon'); const bg = document.getElementById('toast-bg');
+            document.getElementById('toast-msg').innerText = msg;
+            if(type==="error") { bg.classList.remove('bg-slate-900'); bg.classList.add('bg-rose-600'); icon.className = "fas fa-exclamation-triangle text-white"; }
+            else { bg.classList.remove('bg-rose-600'); bg.classList.add('bg-slate-900'); icon.className = "fas fa-check-circle text-purple-400"; }
+            t.classList.remove('hidden');
+            setTimeout(() => { t.classList.remove('opacity-0'); t.classList.add('opacity-100'); }, 10);
+            setTimeout(() => { t.classList.remove('opacity-100'); t.classList.add('opacity-0'); setTimeout(()=>t.classList.add('hidden'),300); }, 3000);
+        }
+
+        window.toggleAuth = (isLogin) => {
+            document.getElementById('login-view').classList.toggle('hidden', !isLogin);
+            document.getElementById('register-view').classList.toggle('hidden', isLogin);
+        };
+        window.handleLogin = async () => {
+            if (!navigator.onLine) return showToast("No internet connection", "error");
+            const email = document.getElementById('login-email').value.trim();
+            const pass = document.getElementById('login-pass').value;
+            if (!email || !pass) return showToast("Enter credentials", "error");
+            if (!email.endsWith('@gmail.com')) return showToast("Use Gmail address", "error");
+            toggleGlobalLoader(true);
+            try {
+                await auth.signInWithEmailAndPassword(email, pass);
+                if (!auth.currentUser.emailVerified) { await auth.signOut(); showToast("Please verify your email! Check Spam folder.", "error"); toggleGlobalLoader(false); return; }
+                showToast("Access Verified");
+            } catch (err) { let msg = err.message; if (err.code === 'auth/user-not-found') msg = "Account not found"; if (err.code === 'auth/wrong-password') msg = "Wrong password"; showToast(msg, "error"); }
+            toggleGlobalLoader(false);
+        };
+        window.handleRegister = async () => {
+            if (!navigator.onLine) return showToast("No internet connection", "error");
+            const email = document.getElementById('reg-email').value.trim();
+            const pass = document.getElementById('reg-pass').value;
+            const confirm = document.getElementById('reg-confirm').value;
+            const referInput = document.getElementById('reg-refer').value.trim().toUpperCase();
+            const termsChecked = document.getElementById('terms-checkbox').checked;
+            if (!termsChecked) return showToast("You must agree to Terms & Privacy", "error");
+            if (!email.endsWith('@gmail.com')) return showToast("Valid Gmail required", "error");
+            if (pass.length < 6) return showToast("Min 6 chars", "error");
+            if (pass !== confirm) return showToast("Passwords do not match", "error");
+            toggleGlobalLoader(true);
+            try {
+                const cred = await auth.createUserWithEmailAndPassword(email, pass);
+                await cred.user.sendEmailVerification();
+                const code = Math.random().toString(36).substring(2,7).toUpperCase();
+                const today = new Date().toISOString().split('T')[0];
+                let referredByUser = null;
+                if (referInput) { const referQuery = await db.collection('users').where('referCode', '==', referInput).get(); if (!referQuery.empty) referredByUser = referQuery.docs[0].id; }
+                await db.collection('users').doc(cred.user.uid).set({ email, balance:0, lifetimeEarned:0, referCode:code, referralEarnings:0, remainingAds:5, remainingTaps:5, remainingSpins:5, dailyCheckinClaimed:false, lastActiveDate:today, streak:0, referredBy: referredByUser || 'NONE', createdAt: Date.now() });
+                await auth.signOut();
+                showToast("Account created! Verification email sent. Check Spam folder. Please login after verifying.", "success");
+                window.toggleAuth(true);
+            } catch (err) { let msg = err.message; if (err.code === 'auth/email-already-in-use') msg = "Email already registered"; showToast(msg, "error"); }
+            toggleGlobalLoader(false);
+        };
+        window.sendVerificationEmail = async () => { if (!auth.currentUser || !navigator.onLine) return; toggleGlobalLoader(true); try { await auth.currentUser.sendEmailVerification(); showToast("Verification email sent! Check Spam folder.", "success"); } catch (err) { showToast(err.message, "error"); } toggleGlobalLoader(false); };
+        async function updateBalance(amount, addToLifetime = true, isReferral = false) {
+            if (!navigator.onLine) throw new Error("No internet");
+            const userRef = db.collection('users').doc(currentUserId);
+            return await db.runTransaction(async (transaction) => {
+                const doc = await transaction.get(userRef);
+                if (!doc.exists) throw new Error("User not found");
+                const currentBalance = doc.data().balance || 0;
+                const newBalance = currentBalance + amount;
+                if (newBalance < 0) throw new Error("Insufficient balance");
+                const updates = { balance: newBalance };
+                if (addToLifetime && amount > 0 && !isReferral) updates.lifetimeEarned = (doc.data().lifetimeEarned || 0) + amount;
+                if (isReferral && amount > 0) updates.referralEarnings = (doc.data().referralEarnings || 0) + amount;
+                transaction.update(userRef, updates);
+                return newBalance;
+            });
+        }
+
+        window.claimDaily = async () => {
+            if (!auth.currentUser || !auth.currentUser.emailVerified) return showToast("Verify email first!", "error");
+            if (userData.dailyCheckinClaimed) return showToast("Already claimed today", "error");
+            let currentStreak = userData.streak || 0;
+            let reward = 0;
+            let newStreak = currentStreak + 1;
+            if (newStreak === 7) {
+                const base = Math.floor(Math.random() * 50) + 1;
+                const gift = Math.floor(Math.random() * 200) + 1;
+                reward = base + gift;
+                newStreak = 0;
+            } else {
+                reward = Math.floor(Math.random() * 50) + 1;
+            }
+            toggleGlobalLoader(true);
+            try {
+                await updateBalance(reward);
+                await db.collection('users').doc(currentUserId).update({ dailyCheckinClaimed: true, streak: newStreak });
+                if (newStreak === 0) showToast(`🎁 Mystery Bonus! You won ${reward} coins on 7th day streak!`);
+                else showToast(`Daily Bonus: +${reward} Coins! Streak: ${newStreak}/7`);
+            } catch (err) { showToast("Failed to claim", "error"); }
+            toggleGlobalLoader(false);
+        };
+
+        window.watchAd = async () => {
+            if (!navigator.onLine) return showToast("No internet","error");
+            if (!auth.currentUser?.emailVerified) return showToast("Verify email first!","error");
+            if (userData.remainingAds <= 0) return showToast("Daily ad limit reached","error");
+            if (isRateLimited('ads')) return;
+            triggerPopunder();
+            toggleGlobalLoader(true);
+            const btn = document.getElementById('watch-ad-btn');
+            const originalText = btn.innerText;
+            btn.innerText = "WATCHING...";
+            btn.disabled = true;
+            let timeLeft = 30;
+            const interval = setInterval(() => { timeLeft--; btn.innerText = `WATCHING... ${timeLeft}s`; if (timeLeft <= 0) clearInterval(interval); }, 1000);
+            await new Promise(r => setTimeout(r, 30000));
+            try {
+                const reward = Math.floor(Math.random() * 30) + 10;
+                await updateBalance(reward);
+                await db.collection('users').doc(currentUserId).update({ remainingAds: userData.remainingAds - 1 });
+                showToast(`Ad Bonus: +${reward} Coins!`);
+            } catch(err) { showToast("Failed to process ad", "error"); }
+            btn.innerText = originalText;
+            btn.disabled = false;
+            toggleGlobalLoader(false);
+        };
+
+        window.handleTap = async () => {
+            if (!navigator.onLine) return showToast("No internet","error");
+            if (!auth.currentUser?.emailVerified) return showToast("Verify email first!","error");
+            if (userData.remainingTaps <= 0) return showToast("Daily tap limit reached","error");
+            if (isTapping) return showToast("Wait for cooldown","error");
+            if (isRateLimited('taps')) return;
+            triggerPopunder();
+            const reward = Math.floor(Math.random() * 20) + 5;
+            toggleGlobalLoader(true);
+            try {
+                await updateBalance(reward);
+                await db.collection('users').doc(currentUserId).update({ remainingTaps: userData.remainingTaps - 1 });
+                showToast(`Tap Reward: +${reward} Coins!`);
+                startTapCooldown();
+            } catch(err) { showToast("Failed", "error"); }
+            toggleGlobalLoader(false);
+        };
+
+        function startTapCooldown() {
+            isTapping = true; let time = 60; const btn = document.getElementById('btn-tap'); const progressDiv = document.getElementById('tap-progress'); const bar = document.getElementById('tap-timer-bar'); const timerText = document.getElementById('tap-timer-text');
+            progressDiv.classList.remove('hidden');
+            function updateTimer(){ time--; const percent = (time/60)*100; bar.style.width = `${percent}%`; timerText.innerText = `Wait ${time}s`; if(time<=0){ clearInterval(tapInterval); isTapping=false; btn.disabled=false; btn.innerText="TAP REWARD"; progressDiv.classList.add('hidden'); } else { btn.disabled=true; btn.innerText=`WAIT ${time}s`; } }
+            tapInterval = setInterval(updateTimer,1000); updateTimer();
+        }
+
+        function initWheelSVG() { const svg = document.getElementById('wheel-svg'); svg.innerHTML=''; const colors=['#7c3aed','#db2777','#4338ca','#9333ea','#c026d3','#6d28d9','#be185d']; wheelRewards.forEach((val,i)=>{ const start=i*sliceAngle; const end=(i+1)*sliceAngle; const mid=start+sliceAngle/2; const radStart=(start-90)*Math.PI/180; const radEnd=(end-90)*Math.PI/180; const x1=50+50*Math.cos(radStart); const y1=50+50*Math.sin(radStart); const x2=50+50*Math.cos(radEnd); const y2=50+50*Math.sin(radEnd); const largeArc=sliceAngle<=180?0:1; const path=document.createElementNS("http://www.w3.org/2000/svg","path"); path.setAttribute("d",`M 50 50 L ${x1} ${y1} A 50 50 0 ${largeArc} 1 ${x2} ${y2} Z`); path.setAttribute("fill",colors[i]); svg.appendChild(path); const text=document.createElementNS("http://www.w3.org/2000/svg","text"); const tr=35; const tx=50+tr*Math.cos((mid-90)*Math.PI/180); const ty=50+tr*Math.sin((mid-90)*Math.PI/180); text.setAttribute("x",tx); text.setAttribute("y",ty); text.setAttribute("fill","white"); text.setAttribute("font-size","6"); text.setAttribute("font-weight","900"); text.setAttribute("text-anchor","middle"); text.setAttribute("dominant-baseline","middle"); text.textContent=val; svg.appendChild(text); }); document.getElementById('wheel-svg').addEventListener('transitionend', onSpinEnd); }
+        let lastStopIdx=0;
+        window.handleSpin = async () => {
+            if (!navigator.onLine) return showToast("No internet","error");
+            if (!auth.currentUser?.emailVerified) return showToast("Verify email first!","error");
+            if (isSpinning) return showToast("Spin in progress","error");
+            if (userData.remainingSpins <= 0) return showToast("No spins left today","error");
+            if (isRateLimited('spins')) return;
+            triggerPopunder();
+            isSpinning = true;
+            document.getElementById('btn-spin').disabled = true;
+            lastStopIdx = Math.floor(Math.random() * 7);
+            const targetDegree = (360 * 5) + (360 - (lastStopIdx * sliceAngle) - (sliceAngle / 2));
+            document.getElementById('wheel-svg').style.transform = `rotate(${targetDegree}deg)`;
+        };
+        async function onSpinEnd() { const reward=wheelRewards[lastStopIdx]; try{ await updateBalance(reward); await db.collection('users').doc(currentUserId).update({ remainingSpins: userData.remainingSpins-1 }); showToast(`Fortune! +${reward} Coins Added`); }catch(err){ showToast("Spin failed","error"); } isSpinning=false; document.getElementById('btn-spin').disabled=false; const currentRot=(360-(lastStopIdx*sliceAngle)-(sliceAngle/2))%360; document.getElementById('wheel-svg').style.transition='none'; document.getElementById('wheel-svg').style.transform=`rotate(${currentRot}deg)`; setTimeout(()=>{ document.getElementById('wheel-svg').style.transition='transform 4s cubic-bezier(0.25,1,0.5,1)'; },50); }
+        window.selectGateway = (gw)=>{ selectedGateway=gw; document.querySelectorAll('.gw-card').forEach(c=>{ c.classList.remove('gateway-selected'); if(c.innerText.includes(gw)) c.classList.add('gateway-selected'); }); showScreen('payout-panel'); };
+        
+        window.setPayoutAmt = (rs, defaultCoins, btn) => {
+            selectedRs = rs;
+            coinsNeeded = withdrawalRates[rs.toString()] || defaultCoins;
+            document.querySelectorAll('.amt-chip').forEach(c => c.classList.remove('amount-chip-active'));
+            btn.classList.add('amount-chip-active');
+            const warning = document.getElementById('payout-warning');
+            if (userData.balance < coinsNeeded) warning.classList.remove('hidden');
+            else warning.classList.add('hidden');
+        };
+        window.submitRedeem = async () => {
+            if (!navigator.onLine) return showToast("No internet","error");
+            if(!auth.currentUser?.emailVerified) return showToast("Verify email first!","error");
+            const addr = document.getElementById('payout-addr').value.trim();
+            if(!selectedGateway) return showToast("Select a payment gateway","error");
+            if(!selectedRs) return showToast("Select withdrawal amount","error");
+            if(!addr) return showToast("Enter UPI ID / mobile number","error");
+            if(userData.balance < coinsNeeded) return showToast("Insufficient balance","error");
+            toggleGlobalLoader(true);
+            try {
+                await updateBalance(-coinsNeeded, false);
+                await db.collection('payouts').add({
+                    userId: currentUserId, email: auth.currentUser.email,
+                    gateway: selectedGateway, amountINR: selectedRs, amountCoins: coinsNeeded,
+                    paymentId: addr, timestamp: Date.now(), status: 'Pending'
+                });
+                showToast("Withdrawal Request Submitted!");
+                document.getElementById('payout-panel').classList.add('hidden');
+                document.getElementById('payout-addr').value = '';
+                selectedGateway = ''; selectedRs = 0; coinsNeeded = 0;
+                document.querySelectorAll('.gw-card').forEach(c => c.classList.remove('gateway-selected'));
+                document.querySelectorAll('.amt-chip').forEach(c => c.classList.remove('amount-chip-active'));
+            } catch(err) { showToast("Insufficient balance or error","error"); }
+            toggleGlobalLoader(false);
+        };
+        
+        function fetchWithdrawalHistory() {
+            if (!currentUserId || !navigator.onLine) return;
+            if (unsubscribePayouts) unsubscribePayouts();
+            unsubscribePayouts = db.collection('payouts')
+                .where('userId', '==', currentUserId)
+                .onSnapshot(snap => {
+                    const historyList = document.getElementById('payout-history-list');
+                    if (snap.empty) {
+                        historyList.innerHTML = '<p class="text-center text-[10px] text-slate-400 py-10 font-black uppercase tracking-widest bg-white rounded-3xl border border-dashed border-slate-200">No withdrawals yet</p>';
+                        return;
+                    }
+                    let items = [];
+                    snap.forEach(doc => { const p = doc.data(); p.id = doc.id; items.push(p); });
+                    items.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+                    historyList.innerHTML = '';
+                    items.forEach(p => {
+                        const date = new Date(p.timestamp).toLocaleDateString();
+                        let badgeClass = 'badge-pending';
+                        if (p.status === 'Confirmed' || p.status === 'Success') badgeClass = 'badge-success';
+                        else if (p.status === 'Rejected') badgeClass = 'badge-rejected';
+                        const div = document.createElement('div');
+                        div.className = 'bg-white p-5 rounded-3xl flex justify-between items-center shadow-sm border border-slate-50';
+                        div.innerHTML = `<div><p class="font-black text-slate-800 text-sm">₹${p.amountINR} • ${p.gateway}</p><p class="text-[9px] text-slate-400 font-bold uppercase mt-1 tracking-widest">${date}</p></div><span class="${badgeClass} px-4 py-2 rounded-full text-[10px] font-black">${p.status}</span>`;
+                        historyList.appendChild(div);
+                    });
+                }, error => { console.error(error); const historyList = document.getElementById('payout-history-list'); if(historyList) historyList.innerHTML = '<p class="text-center text-red-500 text-xs">Error loading history</p>'; });
+        }
+
+        async function syncUserSession() {
+            const today = new Date().toISOString().split('T')[0];
+            const userRef = db.collection('users').doc(currentUserId);
+            const doc = await userRef.get();
+            if (!doc.exists) {
+                const code = Math.random().toString(36).substring(2,7).toUpperCase();
+                await userRef.set({ email: auth.currentUser.email, balance:0, lifetimeEarned:0, referCode:code, referralEarnings:0, remainingAds:5, remainingTaps:5, remainingSpins:5, dailyCheckinClaimed:false, lastActiveDate:today, streak:0, createdAt:Date.now() });
+            }
+            unsubscribeUser = userRef.onSnapshot(async (doc) => {
+                if (!doc.exists) return;
+                const data = doc.data();
+                if (data.lastActiveDate !== today) {
+                    const yesterday = new Date();
+                    yesterday.setDate(yesterday.getDate() - 1);
+                    const yesterdayStr = yesterday.toISOString().split('T')[0];
+                    let newStreak = data.streak || 0;
+                    if (data.lastActiveDate === yesterdayStr && data.dailyCheckinClaimed) {
+                        newStreak = Math.min((data.streak || 0) + 1, 7);
+                        if (newStreak === 7) newStreak = 0;
+                    } else if (data.lastActiveDate !== yesterdayStr) {
+                        newStreak = 0;
+                    }
+                    await userRef.update({ remainingAds:5, remainingTaps:5, remainingSpins:5, dailyCheckinClaimed:false, lastActiveDate:today, streak:newStreak });
+                } else {
+                    userData = {
+                        balance: data.balance || 0,
+                        lifetimeEarned: data.lifetimeEarned || 0,
+                        referCode: data.referCode || '-----',
+                        referralEarnings: data.referralEarnings || 0,
+                        remainingAds: Math.max(0, data.remainingAds ?? 5),
+                        remainingTaps: Math.max(0, data.remainingTaps ?? 5),
+                        remainingSpins: Math.max(0, data.remainingSpins ?? 5),
+                        dailyCheckinClaimed: data.dailyCheckinClaimed || false,
+                        lastActiveDate: data.lastActiveDate || '',
+                        streak: data.streak || 0
+                    };
+                    updateUI();
+                }
+            });
+        }
+        function updateUI() { 
+            document.getElementById('user-display-name').innerText = (auth.currentUser?.email?.split('@')[0] || 'User'); 
+            document.getElementById('balance-coins').innerText = userData.balance.toLocaleString(); 
+            document.getElementById('my-refer-code').innerText = userData.referCode; 
+            document.getElementById('ad-limit-ui').innerText = `${userData.remainingAds} / 5`; 
+            document.getElementById('tap-limit-ui').innerText = `${userData.remainingTaps} / 5`; 
+            document.getElementById('spin-limit-ui').innerText = `${userData.remainingSpins} / 5`; 
+            document.getElementById('prof-email').innerText = auth.currentUser?.email || '---'; 
+            document.getElementById('lifetime-coins').innerText = userData.lifetimeEarned.toLocaleString(); 
+            let streak = userData.streak || 0;
+            document.getElementById('streak-count').innerText = streak;
+            document.getElementById('streak-status').innerText = `Day ${streak}/7`;
+            document.getElementById('refer-earnings').innerHTML = `💰 Total Referral Earnings: ${userData.referralEarnings} coins`; 
+            const dBtn = document.getElementById('btn-daily'); if(dBtn){ dBtn.disabled = userData.dailyCheckinClaimed; dBtn.innerText = userData.dailyCheckinClaimed ? "CLAIMED" : "CLAIM"; if(userData.dailyCheckinClaimed) dBtn.classList.add('btn-disabled'); else dBtn.classList.remove('btn-disabled'); } 
+        }
+        window.switchTab = (id,btn)=>{ document.querySelectorAll('.tab-content').forEach(t=>t.classList.add('hidden')); document.getElementById('tab-'+id).classList.remove('hidden'); document.querySelectorAll('.nav-btn').forEach(b=>{ b.classList.remove('tab-active','text-purple-600'); b.classList.add('text-slate-400'); }); btn.classList.add('tab-active','text-purple-600'); window.scrollTo(0,0); };
+        window.showLeaderboard = ()=> showToast("Coming Soon! Top earners leaderboard","error");
+        window.showDailyTasks = ()=> showToast("Complete tasks: Watch Ads, Tap, Spin!","error");
+        window.handleLogout = ()=>{ if(unsubscribeUser) unsubscribeUser(); if(unsubscribePayouts) unsubscribePayouts(); toggleGlobalLoader(true); auth.signOut().then(()=>location.reload()); };
+        window.copyReferCode = ()=>{ navigator.clipboard.writeText(userData.referCode); showToast("Referral Code Copied!"); };
+        function setupPullToRefresh() { let touchStartY=0, isRefreshing=false; const container=document.querySelector('.main-content'); container.addEventListener('touchstart',(e)=>{ if(window.scrollY===0) touchStartY=e.touches[0].clientY; }); container.addEventListener('touchmove',(e)=>{ const diff=e.touches[0].clientY-touchStartY; if(diff>60 && window.scrollY===0 && !isRefreshing){ e.preventDefault(); isRefreshing=true; document.body.classList.add('ptr-active'); refreshData(); } }); }
+        async function refreshData() { await new Promise(r=>setTimeout(r,1000)); document.body.classList.remove('ptr-active'); showToast("Data refreshed!"); }
+        window.addEventListener('DOMContentLoaded',()=>{
+            if (!navigator.onLine) return;
+            auth.onAuthStateChanged(async (user)=>{
+                if(user){
+                    if(!user.emailVerified){ showToast("Please verify your email! Check Spam folder.","error"); hideScreen('app-container'); showScreen('auth-screen'); document.getElementById('email-verify-badge')?.classList.remove('hidden'); document.getElementById('prof-verify-badge')?.classList.remove('hidden'); document.getElementById('send-verify-btn')?.classList.remove('hidden'); return; }
+                    document.getElementById('email-verify-badge')?.classList.add('hidden'); document.getElementById('prof-verify-badge')?.classList.add('hidden'); document.getElementById('send-verify-btn')?.classList.add('hidden');
+                    currentUserId = user.uid; 
+                    await syncUserSession(); 
+                    await loadWithdrawalRates();
+                    fetchWithdrawalHistory(); 
+                    setupPullToRefresh(); 
+                    hideScreen('splash-screen'); 
+                    hideScreen('auth-screen'); 
+                    showScreen('app-container');
+                } else { 
+                    hideScreen('app-container'); 
+                    setTimeout(()=>{ hideScreen('splash-screen'); showScreen('auth-screen'); },2000); 
+                }
+            });
+            initWheelSVG();
+        });
+    </script>
+</body>
+</html>
